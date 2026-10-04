@@ -1,0 +1,32 @@
+[Unit]
+Description=mcpmux authenticated MCP gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mcpmux
+Group=mcpmux
+ExecStartPre=/usr/local/bin/mcpmux check /etc/mcpmux/mcpmux.toml
+ExecStart=/usr/local/bin/mcpmux serve /etc/mcpmux/mcpmux.toml
+Restart=on-failure
+RestartSec=3
+StateDirectory=mcpmux
+WorkingDirectory=/var/lib/mcpmux
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/mcpmux
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+TasksMax=128
+MemoryMax=256M
+LimitNOFILE=1024
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
