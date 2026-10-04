@@ -38,9 +38,14 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: |
           export CC=musl-gcc
-          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
-          cargo build --release --locked --target ${{ matrix.target }}
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          linker="$(rustc --print sysroot)/lib/rustlib/$host/bin/rust-lld"
+          cargo rustc --release --locked --target ${{ matrix.target }} -- -C linker="$linker" -C link-self-contained=yes -C target-feature=+crt-static
+          if readelf -l target/${{ matrix.target }}/release/mcpmux | grep -q INTERP; then
+            echo "Binary unexpectedly requires a dynamic loader" >&2
+            exit 1
+          fi
+          python3 tests/e2e.py target/${{ matrix.target }}/release/mcpmux
           tar -C target/${{ matrix.target }}/release -czf mcpmux-${{ matrix.target }}.tar.gz mcpmux
           sha256sum mcpmux-${{ matrix.target }}.tar.gz > mcpmux-${{ matrix.target }}.sha256
       - uses: softprops/action-gh-release@v2

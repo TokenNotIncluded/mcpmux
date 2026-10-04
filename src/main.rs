@@ -74,7 +74,7 @@ async fn gateway(State(app): State<Arc<App>>, Path(name): Path<String>, req: Req
     }
     let principal = match auth::authenticate(&app, &name, req.headers()).await {
         Ok(p) => p,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let (parts, body) = req.into_parts();
     if !matches!(parts.method, Method::POST | Method::GET | Method::DELETE) {

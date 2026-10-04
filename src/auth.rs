@@ -277,7 +277,7 @@ pub async fn authenticate(
     app: &App,
     route: &str,
     headers: &HeaderMap,
-) -> Result<Principal, Response> {
+) -> Result<Principal, Box<Response>> {
     let challenge = |status: StatusCode, error: Option<&str>| {
         let mut r = reply(status, json!({"error":error.unwrap_or("unauthorized")}));
         let mut value = format!(
@@ -291,7 +291,7 @@ pub async fn authenticate(
         }
         r.headers_mut()
             .insert("www-authenticate", value.parse().unwrap());
-        r
+        Box::new(r)
     };
     if headers.get_all("authorization").iter().count() != 1 {
         return Err(challenge(StatusCode::UNAUTHORIZED, None));
