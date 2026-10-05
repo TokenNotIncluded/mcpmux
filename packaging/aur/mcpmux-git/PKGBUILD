@@ -10,7 +10,7 @@ license=('MIT')
 optdepends=('systemd: service management and automatic service account creation')
 provides=('mcpmux')
 conflicts=('mcpmux')
-depends=('glibc' 'gcc-libs')
+depends=('glibc' 'libgcc')
 makedepends=('cargo' 'git' 'python')
 # Rust handles LTO; makepkg C LTO can produce incompatible ring objects.
 options=('!lto')
