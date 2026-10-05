@@ -41,15 +41,37 @@ async fn security(req: Request, next: Next) -> Response {
     r
 }
 async fn resource(State(app): State<Arc<App>>, Path(name): Path<String>) -> Response {
-    let Some(route) = app.config.routes.get(&name) else {
+    if app
+        .config
+        .routes
+        .get(&name)
+        .is_some_and(|r| r.path.is_some())
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    resource_for(&app, &name)
+}
+fn resource_for(app: &App, name: &str) -> Response {
+    let Some(route) = app.config.routes.get(name) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     reply(
         StatusCode::OK,
-        json!({"resource":format!("{}/mcp/{name}",app.config.public_url),"authorization_servers":[app.config.public_url],"scopes_supported":route.scopes,"bearer_methods_supported":["header"]}),
+        json!({"resource":format!("{}{}",app.config.public_url,app.config.path(name)),"authorization_servers":[app.config.public_url],"scopes_supported":route.scopes,"bearer_methods_supported":["header"]}),
     )
 }
 async fn gateway(State(app): State<Arc<App>>, Path(name): Path<String>, req: Request) -> Response {
+    if app
+        .config
+        .routes
+        .get(&name)
+        .is_some_and(|r| r.path.is_some())
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    gateway_for(app, name, req).await
+}
+async fn gateway_for(app: Arc<App>, name: String, req: Request) -> Response {
     if !app.config.routes.contains_key(&name) {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -105,7 +127,7 @@ async fn gateway(State(app): State<Arc<App>>, Path(name): Path<String>, req: Req
     transport::forward(app, name, principal, parts.method, parts.headers, bytes).await
 }
 fn router(app: Arc<App>) -> Router {
-    Router::new()
+    let mut routes = Router::new()
         .route(
             "/healthz",
             get(|| async {
@@ -128,7 +150,26 @@ fn router(app: Arc<App>) -> Router {
         )
         .route("/authorize", get(auth::authorize).post(auth::approve))
         .route("/token", post(auth::token))
-        .route("/mcp/{name}", any(gateway))
+        .route("/mcp/{name}", any(gateway));
+    for (name, route) in &app.config.routes {
+        if let Some(path) = &route.path {
+            let route_name = name.clone();
+            routes = routes.route(
+                path,
+                any(move |State(app): State<Arc<App>>, req: Request| {
+                    gateway_for(app, route_name.clone(), req)
+                }),
+            );
+            let metadata_name = name.clone();
+            routes = routes.route(
+                &format!("/.well-known/oauth-protected-resource{path}"),
+                get(move |State(app): State<Arc<App>>| async move {
+                    resource_for(&app, &metadata_name)
+                }),
+            );
+        }
+    }
+    routes
         .layer(DefaultBodyLimit::max(16 * 1024))
         .layer(middleware::from_fn(security))
         .with_state(app)

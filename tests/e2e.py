@@ -85,6 +85,7 @@ with tempfile.TemporaryDirectory(prefix='mcpmux-e2e-') as tmp:
     subprocess.run([binary, 'bootstrap', tmp, 'https://mcp.example'], check=True, stdout=subprocess.DEVNULL)
     port = free_port()
     config = (d / 'mcpmux.toml').read_text().replace('127.0.0.1:8088', f'127.0.0.1:{port}')
+    config = config.replace('[routes.demo]\n', '[routes.demo]\npath = "/jev"\n')
     static = (d / 'demo-token').read_text()
     password = (d / 'owner-password').read_text()
     remote_token = 'test-only-upstream-credential'
@@ -125,6 +126,10 @@ scopes = []
 '''
     (d / 'mcpmux.toml').write_text(config)
     subprocess.run([binary, 'check', str(d / 'mcpmux.toml')], check=True, stdout=subprocess.DEVNULL)
+    for invalid in ['/jev', '/token', '/bad//path', '/bad?query']:
+        (d / 'invalid.toml').write_text(config.replace('[routes.remote]\n', '[routes.remote]\npath = '+json.dumps(invalid)+'\n'))
+        assert subprocess.run([binary, 'check', str(d / 'invalid.toml')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
+
     proc = subprocess.Popen([binary, 'serve', str(d / 'mcpmux.toml')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f'http://127.0.0.1:{port}'
     try:
@@ -136,43 +141,45 @@ scopes = []
                 time.sleep(.05)
         else:
             raise AssertionError('server did not start')
-        code, h, _ = request(base, '/mcp/demo')
+        code, h, _ = request(base, '/jev')
         assert code == 401 and 'resource_metadata=' in h['WWW-Authenticate']
-        assert request(base, '/mcp/demo', token='bad')[0] == 401
+        assert request(base, '/jev', token='bad')[0] == 401
         assert request(base, '/mcp/demo-alias', token=static)[0] == 401
-        assert request(base, '/mcp/demo', token=weak_scope)[0] == 403
-        assert request(base, '/mcp/demo', token=static, headers={'Origin':'https://evil.example'})[0] == 403
-        assert request(base, '/mcp/demo?access_token=anything', token=static)[0] == 400
-        meta = rpc(request(base, '/.well-known/oauth-protected-resource/mcp/demo')[2])
-        assert meta['resource'] == 'https://mcp.example/mcp/demo'
+        assert request(base, '/jev', token=weak_scope)[0] == 403
+        assert request(base, '/jev', token=static, headers={'Origin':'https://evil.example'})[0] == 403
+        assert request(base, '/jev?access_token=anything', token=static)[0] == 400
+        meta = rpc(request(base, '/.well-known/oauth-protected-resource/jev')[2])
+        assert meta['resource'] == 'https://mcp.example/jev'
         assert meta['authorization_servers'] == ['https://mcp.example']
         assert request(base, '/mcp/missing')[0] == 404
+        assert request(base, '/mcp/demo')[0] == 404
+        assert request(base, '/.well-known/oauth-protected-resource/mcp/demo')[0] == 404
         init = {'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'test','version':'1'}}}
-        status, h, body = request(base, '/mcp/demo', init, static)
+        status, h, body = request(base, '/jev', init, static)
         assert status == 200 and rpc(body)['result']['serverInfo']['name'] == 'mcpmux-demo'
         sid = h['Mcp-Session-Id']
         listing = {'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}}
-        status, _, body = request(base, '/mcp/demo', listing, static, {'Mcp-Session-Id':sid})
+        status, _, body = request(base, '/jev', listing, static, {'Mcp-Session-Id':sid})
         assert status == 200 and rpc(body)['result']['tools'][0]['name'] == 'echo'
         assert request(base, '/mcp/demo-alias', listing, alias_token, {'Mcp-Session-Id':sid})[0] == 404
-        assert request(base, '/mcp/demo', {'jsonrpc':'2.0','method':'notifications/initialized'}, static, {'Mcp-Session-Id':sid})[0] == 202
+        assert request(base, '/jev', {'jsonrpc':'2.0','method':'notifications/initialized'}, static, {'Mcp-Session-Id':sid})[0] == 202
         call = {'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'echo','arguments':{'message':'gateway verified'}}}
-        assert rpc(request(base, '/mcp/demo', call, static, {'Mcp-Session-Id':sid})[2])['result']['content'][0]['text'] == 'gateway verified'
-        assert request(base, '/mcp/demo', token=static, headers={'Mcp-Session-Id':sid}, method='DELETE')[0] == 204
-        assert request(base, '/mcp/demo', listing, static, {'Mcp-Session-Id':sid})[0] == 404
+        assert rpc(request(base, '/jev', call, static, {'Mcp-Session-Id':sid})[2])['result']['content'][0]['text'] == 'gateway verified'
+        assert request(base, '/jev', token=static, headers={'Mcp-Session-Id':sid}, method='DELETE')[0] == 204
+        assert request(base, '/jev', listing, static, {'Mcp-Session-Id':sid})[0] == 404
         modern = dict(call, params=dict(call['params'], _meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientInfo':{'name':'test','version':'1'},'io.modelcontextprotocol/clientCapabilities':{}}))
         headers = {'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':'echo'}
-        assert rpc(request(base, '/mcp/demo', modern, static, headers)[2])['result']['content'][0]['text'] == 'gateway verified'
-        assert request(base, '/mcp/demo', modern, static, dict(headers, **{'Mcp-Name':'wrong'}))[0] == 400
+        assert rpc(request(base, '/jev', modern, static, headers)[2])['result']['content'][0]['text'] == 'gateway verified'
+        assert request(base, '/jev', modern, static, dict(headers, **{'Mcp-Name':'wrong'}))[0] == 400
         encoded = base64.b64encode(b'echo').decode()
-        assert request(base, '/mcp/demo', modern, static, dict(headers, **{'Mcp-Name':f'=?base64?{encoded}?='}))[0] == 200
+        assert request(base, '/jev', modern, static, dict(headers, **{'Mcp-Name':f'=?base64?{encoded}?='}))[0] == 200
         discover = {'jsonrpc':'2.0','id':5,'method':'server/discover','params':{'_meta':modern['params']['_meta']}}
-        discovery = rpc(request(base, '/mcp/demo', discover, static, {'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'server/discover'})[2])
+        discovery = rpc(request(base, '/jev', discover, static, {'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'server/discover'})[2])
         assert discovery['result']['resultType'] == 'complete' and '2026-07-28' in discovery['result']['supportedVersions']
         unknown = dict(discover, method='not/a/method')
-        assert request(base, '/mcp/demo', unknown, static, {'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'not/a/method'})[0] == 404
-        assert request(base, '/mcp/demo', modern, static, dict(headers, **{'MCP-Protocol-Version':'2025-11-25'}))[0] == 400
-        assert request(base, '/mcp/demo', modern, static, dict(headers, **{'MCP-Protocol-Version':'2099-01-01'}))[0] == 400
+        assert request(base, '/jev', unknown, static, {'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'not/a/method'})[0] == 404
+        assert request(base, '/jev', modern, static, dict(headers, **{'MCP-Protocol-Version':'2025-11-25'}))[0] == 400
+        assert request(base, '/jev', modern, static, dict(headers, **{'MCP-Protocol-Version':'2099-01-01'}))[0] == 400
         # A legacy server request must reach the request SSE stream, and its
         # client response must reach the same isolated stdio process.
         _, askh, _ = request(base, '/mcp/ask', init, ask_token)
@@ -210,11 +217,11 @@ scopes = []
         assert len(events) == 2 and events[-1]['result']['ok'] is True
         assert seen[-1]['mcp-param-custom'] == 'opaque'
         assert request(base, '/token', {}, form=True)[0] == 400
-        assert request(base, '/mcp/demo', b'x'*(1024*1024+1), static, {'Content-Type':'application/json','Accept':'application/json, text/event-stream'})[0] == 413
+        assert request(base, '/jev', b'x'*(1024*1024+1), static, {'Content-Type':'application/json','Accept':'application/json, text/event-stream'})[0] == 413
         # OAuth flow: exact registration, consent, PKCE, resource binding, code replay.
         verifier = 'x' * 43
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
-        authq = {'response_type':'code','client_id':'mcpmux-local','redirect_uri':'http://127.0.0.1:8765/callback','resource':'https://mcp.example/mcp/demo','code_challenge':challenge,'code_challenge_method':'S256','scope':'mcp:access','state':'csrf-state'}
+        authq = {'response_type':'code','client_id':'mcpmux-local','redirect_uri':'http://127.0.0.1:8765/callback','resource':'https://mcp.example/jev','code_challenge':challenge,'code_challenge_method':'S256','scope':'mcp:access','state':'csrf-state'}
         assert request(base, '/authorize?' + urllib.parse.urlencode(dict(authq, redirect_uri='https://evil.example')))[0] == 400
         def get_code():
             status, _, page = request(base, '/authorize?' + urllib.parse.urlencode(authq))
@@ -234,7 +241,7 @@ scopes = []
         assert status == 200
         oauth = rpc(body)['access_token']
         assert request(base, '/token', exchange, form=True)[0] == 400
-        assert request(base, '/mcp/demo', modern, oauth, headers)[0] == 200
+        assert request(base, '/jev', modern, oauth, headers)[0] == 200
         assert request(base, '/mcp/demo-alias', modern, oauth, headers)[0] == 401
         print('PASS: stdio legacy/modern, aliases, HTTP streaming/session isolation, credential separation, Origin, scopes, OAuth PKCE/resource binding/replay')
     finally:

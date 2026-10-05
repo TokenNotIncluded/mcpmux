@@ -81,10 +81,13 @@ impl Store {
     }
 }
 fn resource_route(app: &App, resource: &str) -> Option<String> {
-    let prefix = format!("{}/mcp/", app.config.public_url);
-    let r = resource.strip_prefix(&prefix)?;
-    app.config.routes.contains_key(r).then(|| r.into())
+    app.config
+        .routes
+        .keys()
+        .find(|name| resource == format!("{}{}", app.config.public_url, app.config.path(name)))
+        .cloned()
 }
+
 pub async fn metadata(State(app): State<Arc<App>>) -> Response {
     let base = &app.config.public_url;
     reply(
@@ -281,9 +284,9 @@ pub async fn authenticate(
     let challenge = |status: StatusCode, error: Option<&str>| {
         let mut r = reply(status, json!({"error":error.unwrap_or("unauthorized")}));
         let mut value = format!(
-            "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource/mcp/{}\", scope=\"{}\"",
+            "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource{}\", scope=\"{}\"",
             app.config.public_url,
-            route,
+            app.config.path(route),
             app.config.routes[route].scopes.join(" ")
         );
         if let Some(e) = error {

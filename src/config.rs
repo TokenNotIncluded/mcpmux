@@ -62,6 +62,7 @@ pub enum Upstream {
 pub struct Route {
     pub upstream: Option<String>,
     pub alias: Option<String>,
+    pub path: Option<String>,
     #[serde(default = "scopes")]
     pub scopes: Vec<String>,
 }
@@ -91,6 +92,12 @@ impl Config {
         let c: Self = toml::from_str(&std::fs::read_to_string(path)?).context("invalid TOML")?;
         c.validate()?;
         Ok(c)
+    }
+    pub fn path(&self, name: &str) -> String {
+        self.routes[name]
+            .path
+            .clone()
+            .unwrap_or_else(|| format!("/mcp/{name}"))
     }
     pub fn resolve(&self, name: &str) -> Result<&Upstream> {
         let mut name = name;
@@ -127,7 +134,21 @@ impl Config {
         if self.max_sessions == 0 || self.max_sessions > 1024 || self.session_idle_seconds == 0 {
             bail!("invalid session limits");
         }
+        let mut paths = BTreeSet::new();
         for (name, r) in &self.routes {
+            let path = self.path(name);
+            if !path.starts_with('/')
+                || path.ends_with('/')
+                || path.contains("//")
+                || !path
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"/_-".contains(&b))
+                || ["/authorize", "/token", "/healthz"].contains(&path.as_str())
+                || !paths.insert(path)
+            {
+                bail!("invalid, reserved or duplicate route path");
+            }
+
             if name.is_empty()
                 || !name
                     .bytes()

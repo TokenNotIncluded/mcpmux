@@ -60,6 +60,8 @@ type = "http"
 url = "http://127.0.0.1:9001/mcp"
 
 [routes.name_a]
+# 可选：自定义公开路径；未指定时使用 /mcp/name_a
+# path = "/jev"
 upstream = "files"
 scopes = ["mcp:access"]
 
@@ -145,3 +147,36 @@ python3 tests/e2e.py target/debug/mcpmux
 ```
 
 规范：[MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)、[Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)。
+
+## Jev 示例
+
+[Jev MCP](https://github.com/jkudish/jev-mcp) 需要 Node.js 22 或更新版本。固定安装 `@jkudish/jev-mcp@0.13.0` 到 `/opt/jev-mcp`，保存 npm lockfile，并使用 [jev-mcp.service](packaging/jev-mcp.service) 运行单个共享 HTTP 进程。服务用户为 `jev-mcp`；不要以 root 运行 Node.js。
+
+`/etc/mcpmux/jev.env` 使用 root-only `0600` 权限，内容如下（占位值必须替换）：
+
+```ini
+TYPESAFE_API_KEY=YOUR_TYPESAFE_KEY
+JEV_PROVIDER=typesafe
+JEV_MCP_MODEL=jev-latest
+HOST=127.0.0.1
+PORT=8091
+JEV_MCP_AUTH_TOKEN=INDEPENDENT_UPSTREAM_SECRET
+JEV_MCP_MAX_CONCURRENCY=8
+```
+
+把同一个上游凭证单独写入 `/etc/mcpmux/jev-upstream-token`，权限 `root:mcpmux 0640`。网关配置追加：
+
+```toml
+[upstreams.jev]
+type = "http"
+url = "http://127.0.0.1:8091/mcp"
+bearer_file = "/etc/mcpmux/jev-upstream-token"
+
+[routes.jev]
+path = "/jev"
+upstream = "jev"
+```
+
+客户端使用 `https://你的域名/jev`，授权资源和发现地址也会使用 `/jev`。该路由不会同时开放 `/mcp/jev`。客户端 OAuth 许可列表需增加 `jev`；工具市场使用另一个仅绑定该路由的服务凭证，不能复用 TypeSafe key 或上游凭证。更新配置后先 `mcpmux check`，然后重启服务。
+
+Jev 调用会把输入发送到 TypeSafe，返回结果包含 token 用量。网关不承担计费；固定按次收费的市场只能通过参考输入量估算成本倍率。
