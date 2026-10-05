@@ -121,4 +121,3 @@ python3 tests/e2e.py target/debug/mcpmux
 ```
 
 规范：[MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)、[Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)。
-
